@@ -1,0 +1,202 @@
+version: '3.8'
+
+# ============================================================
+# ORACLE CLOUD ARM - AIOStreams + *ARR Stack + nzbDAV + NPM
+# Tested on VM.Standard.A1.Flex (Ubuntu 22.04 / ARM64)
+# Stack: Nginx Proxy Manager | AIOStreams | nzbDAV
+#        UsenetStreamer | Prowlarr | Radarr | Sonarr | WARP
+# ============================================================
+
+networks:
+  proxy_net:
+    driver: bridge
+  arr_net:
+    driver: bridge
+
+volumes:
+  npm_data:
+  npm_letsencrypt:
+  radarr_config:
+  sonarr_config:
+  prowlarr_config:
+  nzbdav_config:
+  aiostreams_data:
+  # Shared volume: nzbDAV writes .strm files, AIOStreams reads them
+  nzbdav_shared:
+
+services:
+
+  # =====================
+  # NGINX PROXY MANAGER
+  # =====================
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy_net
+    healthcheck:
+      test: ["CMD", "/bin/check-health"]
+      interval: 10s
+      timeout: 3s
+
+  # =====================
+  # AIOSTREAMS
+  # =====================
+  aiostreams:
+    image: ghcr.io/viren070/aiostreams:latest
+    container_name: aiostreams
+    restart: unless-stopped
+    expose:
+      - "3000"
+    env_file:
+      - .env.aiostreams
+    volumes:
+      - aiostreams_data:/app/data
+      # Shared with nzbDAV so AIOStreams can serve .strm files
+      - nzbdav_shared:/data
+    networks:
+      - proxy_net
+      - arr_net
+    depends_on:
+      - nzbdav
+
+  # =====================
+  # nzbDAV
+  # Usenet WebDAV server — streams NZBs without downloading
+  # Acts as a SABnzbd-compatible API for Radarr/Sonarr
+  # =====================
+  nzbdav:
+    image: nzbdav/nzbdav:alpha
+    container_name: nzbdav
+    restart: unless-stopped
+    expose:
+      - "3000"
+    volumes:
+      - nzbdav_config:/config
+      # Shared with AIOStreams — nzbDAV writes .strm files here
+      - nzbdav_shared:/data
+    env_file:
+      - .env.arr
+    networks:
+      - proxy_net
+      - arr_net
+
+  # =====================
+  # USENETSTREAMER
+  # Stremio addon that bridges nzbDAV + Prowlarr into a stream source
+  # Expose to NPM so AIOStreams can use it as a custom addon
+  # =====================
+  usenetstreamer:
+    image: ghcr.io/sanket9225/usenetstreamer:dev
+    container_name: usenetstreamer
+    restart: unless-stopped
+    expose:
+      - "7000"
+    environment:
+      - ADDON_SHARED_SECRET=${USENETSTREAMER_SECRET}
+    networks:
+      - proxy_net
+      - arr_net
+    depends_on:
+      - nzbdav
+      - prowlarr
+
+  # =====================
+  # CLOUDFLARE WARP
+  # Bypasses Oracle IP blocks on Torrentio / strem.fun
+  # =====================
+  warp:
+    image: caomingjun/warp
+    container_name: warp
+    restart: unless-stopped
+    device_cgroup_rules:
+      - 'c 10:200 rwm'
+    expose:
+      - "1080"
+    environment:
+      - WARP_SLEEP=5
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      - ./warp:/var/lib/cloudflare-warp
+    healthcheck:
+      test: curl -x "socks5h://127.0.0.1:1080" -fsSL "https://www.cloudflare.com/cdn-cgi/trace" | grep -qE "warp=(plus|on)" || exit 1
+      interval: 1m
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - arr_net
+
+  # =====================
+  # PROWLARR (Indexer Manager)
+  # Manages your Usenet indexers for Radarr/Sonarr/UsenetStreamer
+  # =====================
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    env_file:
+      - .env.arr
+    expose:
+      - "9696"
+    volumes:
+      - prowlarr_config:/config
+    networks:
+      - proxy_net
+      - arr_net
+
+  # =====================
+  # RADARR (Movies)
+  # Uses nzbDAV as download client via SABnzbd-compatible API
+  # =====================
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    env_file:
+      - .env.arr
+    expose:
+      - "7878"
+    volumes:
+      - radarr_config:/config
+      # nzbDAV mounts streamed content here (no actual storage used)
+      - nzbdav_shared:/mnt/nzbdav
+    networks:
+      - proxy_net
+      - arr_net
+    depends_on:
+      - nzbdav
+
+  # =====================
+  # SONARR (TV Shows)
+  # Uses nzbDAV as download client via SABnzbd-compatible API
+  # =====================
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    env_file:
+      - .env.arr
+    expose:
+      - "8989"
+    volumes:
+      - sonarr_config:/config
+      # nzbDAV mounts streamed content here (no actual storage used)
+      - nzbdav_shared:/mnt/nzbdav
+    networks:
+      - proxy_net
+      - arr_net
+    depends_on:
+      - nzbdav

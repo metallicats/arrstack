@@ -1,0 +1,64 @@
+# =====================================================
+# Nginx Proxy Manager - Proxy Host Reference
+# =====================================================
+# After running docker compose up -d:
+#   1. Go to http://YOUR_VM_IP:81
+#   2. Login: admin@example.com / changeme
+#   3. Change credentials immediately!
+#   4. For each service: Proxy Hosts > Add Proxy Host
+#        - Domain Names: <subdomain.yourdomain.com>
+#        - Scheme: http
+#        - Forward Hostname: <container_name>
+#        - Forward Port: <port>
+#        - SSL tab: Request new Let's Encrypt certificate
+# =====================================================
+
+Service           | Container Name    | Internal Port
+------------------|-------------------|---------------
+AIOStreams         | aiostreams        | 3000
+nzbDAV            | nzbdav            | 3000
+UsenetStreamer     | usenetstreamer    | 7000
+Prowlarr          | prowlarr          | 9696
+Radarr            | radarr            | 7878
+Sonarr            | sonarr            | 8989
+NPM Admin UI      | (direct)          | 81 (no proxy needed)
+
+# =====================================================
+# nzbDAV Configuration (after first run)
+# =====================================================
+# 1. Open https://nzbdav.yourdomain.com
+# 2. Go to Settings and add your Usenet provider
+#    credentials (server, port, SSL, connections)
+# 3. Set a WebDAV username and password
+# 4. Note your API key for Radarr/Sonarr setup below
+#
+# =====================================================
+# Radarr & Sonarr - Add nzbDAV as Download Client
+# =====================================================
+# In Radarr/Sonarr:
+#   Settings > Download Clients > Add > SABnzbd
+#     Host:     nzbdav
+#     Port:     3000
+#     API Key:  (from nzbDAV settings page)
+#     Category: (leave blank or set "Stremio" for UsenetStreamer)
+#
+# =====================================================
+# UsenetStreamer - Configure in Web UI
+# =====================================================
+# Open https://usenetstreamer.yourdomain.com/<SECRET>/configure
+# Connect it to:
+#   - Prowlarr: http://prowlarr:9696 + API key
+#   - nzbDAV:   http://nzbdav:3000   + API key + WebDAV creds
+# Then add the manifest URL to AIOStreams as a custom addon:
+#   https://usenetstreamer.yourdomain.com/<SECRET>/manifest.json
+#
+# =====================================================
+# Oracle Cloud VCN Ingress Rules (Security List)
+# =====================================================
+# OCI Console > VCN > Security Lists > Add rules:
+#
+# Stateless  Source       Protocol  Port Range
+# No         0.0.0.0/0   TCP       80
+# No         0.0.0.0/0   TCP       81
+# No         0.0.0.0/0   TCP       443
+# =====================================================
