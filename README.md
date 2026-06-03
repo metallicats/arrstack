@@ -1,5 +1,7 @@
 This will install the usual ARR stack as follows:
 
+NginX Proxy Manager is installed separately.
+
 | Hostname                      | Forward Hostname | Port |
 | ----------------------------- | ---------------- | ---- |
 | aiostreams.yourdomain.com     | aiostreams       | 3000 |
